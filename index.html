@@ -87,7 +87,6 @@
       color: #94a3b8;
     }
     
-    /* 播放控制區塊與按鈕樣式 */
     .slider-row {
       display: flex;
       align-items: center;
@@ -203,10 +202,9 @@
 
       <div class="controls">
         <div class="timeline-info">
-          <span id="time-display">即時畫面</span>
-          <span id="mode-badge" style="color: #4ade80;">● 即時</span>
+          <span id="time-display">畫面載入中...</span>
+          <span id="mode-badge" style="color: #4ade80;">● 最新紀錄</span>
         </div>
-        <!-- 加入自動播放控制區塊 -->
         <div class="slider-row">
           <button id="play-btn" onclick="togglePlay()">▶ 播放</button>
           <input type="range" id="time-slider" min="0" max="0" value="0" oninput="onSliderChange(this.value)">
@@ -260,7 +258,6 @@
     let currentCam = null;
     let currentCamFiles = [];
     
-    let liveTimer = null;
     let autoPlayTimer = null;
     let isPlaying = false;
     
@@ -268,10 +265,15 @@
     const imgEl = document.getElementById('cctv-img');
     const playBtn = document.getElementById('play-btn');
 
-    fetch('history/index.json')
-      .then(res => res.json())
-      .then(data => { historyData = data; })
-      .catch(() => console.log('尚未產生歷史資料'));
+    // 每次開啟前先抓取最新的 JSON 檔案，確保歷史清單是最新的
+    function fetchHistoryData() {
+      // 加上時間戳記避免瀏覽器快取舊的 json
+      return fetch(`history/index.json?t=${Date.now()}`)
+        .then(res => res.json())
+        .then(data => { historyData = data; })
+        .catch(() => console.log('尚未產生歷史資料'));
+    }
+    fetchHistoryData();
 
     const map = L.map('map').setView([23.8708, 121.5125], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', { maxZoom: 19 }).addTo(map);
@@ -284,11 +286,14 @@
     cctvList.forEach(cam => {
       const marker = L.marker([cam.lat, cam.lng], { icon: camIcon }).addTo(map);
       marker.bindTooltip(`<b>${cam.name}</b><br>Lat: ${cam.lat}, Lng: ${cam.lng}`);
-      marker.on('click', () => openCam(cam));
+      marker.on('click', () => {
+        // 點擊鏡頭時，重新去要一次最新資料
+        fetchHistoryData().then(() => openCam(cam));
+      });
     });
 
     function openCam(cam) {
-      pauseAutoPlay(); // 打開新攝影機時先暫停播放
+      pauseAutoPlay();
       currentCam = cam;
       document.getElementById('cam-name').innerText = cam.name;
       document.getElementById('cam-coord').innerText = `(${cam.lat}, ${cam.lng})`;
@@ -299,8 +304,9 @@
       currentCamFiles = (historyData && historyData[cam.id]) ? historyData[cam.id] : [];
       
       if (currentCamFiles.length > 0) {
-        slider.max = currentCamFiles.length; // +1 給即時畫面
-        slider.value = currentCamFiles.length; 
+        // 徹底放棄官方快照，滑桿最大值直接對應我們歷史庫的最後一張圖
+        slider.max = currentCamFiles.length - 1; 
+        slider.value = currentCamFiles.length - 1; 
       } else {
         slider.max = 0;
         slider.value = 0;
@@ -310,13 +316,11 @@
       map.invalidateSize();
     }
 
-    // 手動拖拉時自動暫停
     function onSliderChange(index) {
       if (isPlaying) pauseAutoPlay();
       showImageAtIndex(index);
     }
 
-    // 播放鍵切換邏輯
     function togglePlay() {
       if (!currentCamFiles || currentCamFiles.length === 0) return;
       if (isPlaying) {
@@ -331,17 +335,14 @@
       playBtn.innerText = "⏸ 暫停";
       playBtn.classList.add('playing');
 
-      // 如果已經在最後一格，自動歸零從頭播
       if (parseInt(slider.value) === parseInt(slider.max)) {
         slider.value = 0;
         showImageAtIndex(0);
       }
 
-      // 每 0.8 秒換一張圖
       autoPlayTimer = setInterval(() => {
         let nextIndex = parseInt(slider.value) + 1;
         if (nextIndex > parseInt(slider.max)) {
-          // 播到底，停留在即時畫面並暫停
           pauseAutoPlay();
         } else {
           slider.value = nextIndex;
@@ -361,33 +362,30 @@
     }
 
     function showImageAtIndex(index) {
-      const isLive = (index == slider.max);
+      if (!currentCamFiles || currentCamFiles.length === 0) {
+        // 備用防呆：如果 GitHub 完全沒資料，還是秀出官方的 (雖然可能很舊)
+        const cacheBuster = `t=${Date.now()}&r=${Math.random()}`;
+        imgEl.src = `https://c01.twipcam.com/cam/snapshot/${currentCam.id}.jpg?${cacheBuster}`;
+        document.getElementById('time-display').innerText = `目前無歷史紀錄 (顯示官方快照)`;
+        document.getElementById('mode-badge').innerText = "● 官方快取";
+        document.getElementById('mode-badge').style.color = "#94a3b8";
+        return;
+      }
 
-      if (isLive) {
-        updateLiveImage();
-        if (!liveTimer) liveTimer = setInterval(updateLiveImage, 60000); 
+      // 全部改吃自己的歷史圖片庫
+      const fileName = currentCamFiles[index];
+      imgEl.src = `history/${currentCam.id}/${fileName}`;
+      
+      const timeStr = `${fileName.slice(0,4)}/${fileName.slice(4,6)}/${fileName.slice(6,8)} ${fileName.slice(9,11)}:${fileName.slice(11,13)}`;
+      document.getElementById('time-display').innerText = `記錄時間：${timeStr}`;
 
-        document.getElementById('time-display').innerText = `觀看時間：即時畫面`;
-        document.getElementById('mode-badge').innerText = "● 即時最新";
+      if (index == slider.max) {
+        document.getElementById('mode-badge').innerText = "● 最新紀錄";
         document.getElementById('mode-badge').style.color = "#4ade80";
       } else {
-        if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-        
-        if (currentCamFiles && currentCamFiles.length > 0) {
-          const fileName = currentCamFiles[index];
-          imgEl.src = `history/${currentCam.id}/${fileName}`;
-          
-          const timeStr = `${fileName.slice(0,4)}/${fileName.slice(4,6)}/${fileName.slice(6,8)} ${fileName.slice(9,11)}:${fileName.slice(11,13)}`;
-          document.getElementById('time-display').innerText = `記錄時間：${timeStr}`;
-          document.getElementById('mode-badge').innerText = "⏱ 歷史回放";
-          document.getElementById('mode-badge').style.color = "#f59e0b";
-        }
+        document.getElementById('mode-badge').innerText = "⏱ 歷史回放";
+        document.getElementById('mode-badge').style.color = "#f59e0b";
       }
-    }
-
-    function updateLiveImage() {
-      const cacheBuster = `t=${Date.now()}&r=${Math.random()}`;
-      imgEl.src = `https://c01.twipcam.com/cam/snapshot/${currentCam.id}.jpg?${cacheBuster}`;
     }
 
     function fetchWeather(lat, lng) {
@@ -439,7 +437,6 @@
 
     function closeCam() {
       pauseAutoPlay();
-      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
       imgEl.src = ""; 
       document.getElementById('cctv-panel').classList.add('hidden');
       map.invalidateSize();
