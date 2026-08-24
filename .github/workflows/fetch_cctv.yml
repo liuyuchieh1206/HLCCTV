@@ -36,8 +36,11 @@ jobs:
           timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
 
           with sync_playwright() as p:
-              browser = p.chromium.launch(headless=True)
-              # 稍微放大虛擬螢幕，確保畫質清晰
+              # 👑 關鍵修正 1：加入底層參數，強制關閉 Chrome 的「禁止自動播放限制」
+              browser = p.chromium.launch(
+                  headless=True,
+                  args=["--autoplay-policy=no-user-gesture-required"]
+              )
               context = browser.new_context(viewport={'width': 1920, 'height': 1080})
               page = context.new_page()
               
@@ -47,18 +50,24 @@ jobs:
                   try:
                       page.goto(f"https://www.twipcam.com/cam/{cam}", timeout=60000)
                       
-                      # 停頓 15 秒，讓網頁載入最新畫面
-                      time.sleep(15)
-                      
-                      # 👑 關鍵修正：精準尋找 <video> 或 src 包含該攝影機 ID 的 <img>
+                      # 先給網頁 3 秒鐘載入基本元素
+                      time.sleep(3)
                       player = page.locator(f"video, img[src*='{cam}']").first
                       
+                      # 👑 關鍵修正 2：雙重保險，模擬滑鼠精準點擊播放器來喚醒串流
                       if player.is_visible():
-                          # 只針對這個播放器元素截圖，完美去背！
+                          try:
+                              player.click(timeout=5000)
+                          except:
+                              pass
+                      
+                      # 停頓 15 秒，讓即時串流影片有足夠時間緩衝並跳出最新的時間戳記
+                      time.sleep(15)
+                      
+                      if player.is_visible():
                           player.screenshot(path=f"history/{cam}/{timestamp}.jpg")
-                          print(f"成功截取 {cam} 的純淨畫面！")
+                          print(f"成功截取 {cam} 的最新跳動畫面！")
                       else:
-                          # 真的找不到才截全圖
                           page.screenshot(path=f"history/{cam}/{timestamp}.jpg")
                           
                   except Exception as e:
