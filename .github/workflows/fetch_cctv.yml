@@ -1,0 +1,48 @@
+name: Auto Backup CCTV Snapshot
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  fetch-and-save:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Download Snapshots & Clean Old Files (72h)
+        run: |
+          export TZ="Asia/Taipei"
+          TIMESTAMP=$(date +'%Y%m%d_%H%M')
+          
+          mkdir -p history/wra-000901 history/wra-000779
+
+          curl -s "https://c01.twipcam.com/cam/snapshot/wra-000901.jpg" -o "history/wra-000901/${TIMESTAMP}.jpg"
+          curl -s "https://c01.twipcam.com/cam/snapshot/wra-000779.jpg" -o "history/wra-000779/${TIMESTAMP}.jpg"
+
+          find history/ -type f -name "*.jpg" -mtime +3 -exec rm {} \;
+
+          python3 -c '
+          import os, json
+          cams = ["wra-000901", "wra-000779"]
+          data = {}
+          for c in cams:
+              path = f"history/{c}"
+              if os.path.exists(path):
+                  files = sorted([f for f in os.listdir(path) if f.endswith(".jpg")])
+                  data[c] = files
+          with open("history/index.json", "w") as f:
+              json.dump(data, f)
+          '
+
+      - name: Commit and Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add history/
+          git commit -m "Auto backup CCTV snapshot [skip ci]" || exit 0
+          git push
