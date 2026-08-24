@@ -62,16 +62,42 @@
     }
     .close-btn { background: #334155; border: none; color: #fff; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
     
+    /* 影像容器設定為隱藏溢出，準備進行 CSS 裁切 */
     .video-container {
       flex: 1;
-      display: flex;
-      justify-content: center;
-      align-items: center;
       background: #000;
-      overflow: hidden;
+      position: relative;
+      overflow: hidden; 
     }
-    /* 滿版乾淨的圖片顯示 */
-    #cctv-img { width: 100%; height: 100%; object-fit: contain; }
+    
+    /* 歷史圖片維持滿版 */
+    #cctv-img {
+      width: 100%;
+      height: 100%;
+      object-fit: contain;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    
+    /* 針對 iframe 進行上下裁切放大，去除 TWIPCam 的標題與底列 */
+    #iframe-wrapper {
+      display: none;
+      width: 100%;
+      height: 100%;
+      position: absolute;
+      top: 0;
+      left: 0;
+    }
+    #cctv-iframe {
+      position: absolute;
+      top: -45px;       /* 往上推，隱藏頂部標題列 */
+      left: 0;
+      width: 100%;
+      height: calc(100% + 100px); /* 增加高度彌補推移，隱藏底部控制列 */
+      border: none;
+      pointer-events: none; /* 禁用點擊，避免誤觸裡面按鈕 */
+    }
 
     .controls {
       background: #1e293b;
@@ -135,33 +161,15 @@
       min-height: 1px;
       position: relative;
     }
-    .rain-bar:hover::after {
-      content: attr(data-time) ' \A ' attr(data-val) 'mm';
-      white-space: pre;
-      position: absolute;
-      bottom: calc(100% + 4px);
-      left: 50%;
-      transform: translateX(-50%);
-      background: #f8fafc;
-      color: #0f172a;
-      padding: 4px 6px;
-      border-radius: 4px;
-      font-size: 10px;
-      z-index: 10;
-      text-align: center;
-      box-shadow: 0 2px 4px rgba(0,0,0,0.5);
-      pointer-events: none;
-    }
   </style>
 </head>
 <body>
   <header>
     <div>
       <h1>花蓮水利科 監控地圖 (72H回顧)</h1>
-      <!-- 左上角即時跳動的日期與時間 -->
       <div id="sys-clock" style="font-size: 0.75rem; color: #94a3b8;">載入時間中...</div>
     </div>
-    <span style="font-size: 0.75rem; color: #94a3b8;">壽豐站水情</span>
+    <span style="font-size: 0.75rem; color: #94a3b8;">網格推算氣象</span>
   </header>
 
   <div id="container">
@@ -176,9 +184,14 @@
         <button class="close-btn" onclick="closeCam()">關閉 ✕</button>
       </div>
       
-      <!-- 乾淨滿版的圖片容器 -->
       <div class="video-container">
+        <!-- 歷史照片區塊 -->
         <img id="cctv-img" src="" alt="畫面載入中..." />
+        
+        <!-- 即時畫面區塊：採用 iframe 並由外層 CSS 進行邊界裁切 -->
+        <div id="iframe-wrapper">
+          <iframe id="cctv-iframe" src=""></iframe>
+        </div>
       </div>
 
       <div class="controls">
@@ -191,11 +204,11 @@
 
       <div class="info-card">
         <div class="info-item">
-          <span class="label">壽豐即時氣溫</span>
+          <span class="label">當地即時氣溫</span>
           <span class="value" id="val-temp">-- °C</span>
         </div>
         <div class="info-item">
-          <span class="label">當前時雨量</span>
+          <span class="label">推算時雨量</span>
           <span class="value" id="val-rain" style="color: #4ade80;">-- mm</span>
         </div>
         <div class="info-item">
@@ -210,8 +223,7 @@
 
       <div class="rain-chart-container">
         <div class="rain-chart-title">
-          <span>過去 24 小時降雨趨勢</span>
-          <!-- 右側直接顯示累積總雨量數字 -->
+          <span>過去 24 小時降雨趨勢 (模型推算)</span>
           <span id="val-24h-sum" style="color: #4ade80; font-weight: bold;">累積 0.0 mm</span>
         </div>
         <div class="rain-bars" id="rain-chart"></div>
@@ -220,7 +232,6 @@
   </div>
 
   <script>
-    // 系統時鐘自動更新
     function updateClock() {
       const now = new Date();
       const timeStr = now.toLocaleString('zh-TW', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -237,9 +248,10 @@
     let historyData = {};
     let currentCam = null;
     let currentCamFiles = [];
-    let liveTimer = null;
     const slider = document.getElementById('time-slider');
     const imgEl = document.getElementById('cctv-img');
+    const iframeWrapper = document.getElementById('iframe-wrapper');
+    const iframeEl = document.getElementById('cctv-iframe');
 
     fetch('history/index.json')
       .then(res => res.json())
@@ -271,7 +283,7 @@
       currentCamFiles = (historyData && historyData[cam.id]) ? historyData[cam.id] : [];
       
       if (currentCamFiles.length > 0) {
-        slider.max = currentCamFiles.length; // Max 值保留給「即時畫面」
+        slider.max = currentCamFiles.length; 
         slider.value = currentCamFiles.length; 
       } else {
         slider.max = 0;
@@ -290,16 +302,23 @@
       const isLive = (index == slider.max);
 
       if (isLive) {
-        // 切回即時模式：改向主伺服器要乾淨的 snapshot
-        updateLiveImage();
-        if (!liveTimer) liveTimer = setInterval(updateLiveImage, 60000); 
+        // 即時畫面：顯示 iframe 裁切層，隱藏圖片
+        imgEl.style.display = 'none';
+        iframeWrapper.style.display = 'block';
+        
+        // 確保 iframe 載入官方頁面以獲得真實時間
+        const liveUrl = `https://www.twipcam.com/cam/${currentCam.id}`;
+        if (iframeEl.src !== liveUrl) {
+          iframeEl.src = liveUrl;
+        }
 
-        document.getElementById('time-display').innerText = `觀看時間：即時畫面`;
+        document.getElementById('time-display').innerText = `觀看時間：即時影像`;
         document.getElementById('mode-badge').innerText = "● 即時最新";
         document.getElementById('mode-badge').style.color = "#4ade80";
       } else {
-        // 切換為歷史模式
-        if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+        // 歷史回放：顯示我們自動儲存的圖片
+        iframeWrapper.style.display = 'none';
+        imgEl.style.display = 'block';
         
         if (currentCamFiles && currentCamFiles.length > 0) {
           const fileName = currentCamFiles[index];
@@ -311,12 +330,6 @@
           document.getElementById('mode-badge').style.color = "#f59e0b";
         }
       }
-    }
-
-    function updateLiveImage() {
-      // 這裡已修正回正確的 c01 伺服器，並加上雙重隨機參數徹底繞過快取
-      const cacheBuster = `t=${Date.now()}&r=${Math.random()}`;
-      imgEl.src = `https://c01.twipcam.com/cam/snapshot/${currentCam.id}.jpg?${cacheBuster}`;
     }
 
     function fetchWeather(lat, lng) {
@@ -341,7 +354,6 @@
           const hourlyRain = data.hourly.precipitation.slice(0, 24); 
           const hourlyTime = data.hourly.time.slice(0, 24);
           
-          // 計算 24 小時累積加總
           const sum24h = hourlyRain.reduce((sum, val) => sum + val, 0).toFixed(1);
           const sumEl = document.getElementById('val-24h-sum');
           sumEl.innerText = `累積 ${sum24h} mm`;
@@ -361,15 +373,14 @@
             if (val >= 10) bgColor = '#f59e0b';
             if (val >= 20) bgColor = '#ef4444';
 
-            chart.innerHTML += `<div class="rain-bar" data-time="${timeLabel}" data-val="${val}" style="height: ${heightPct}%; background: ${bgColor};"></div>`;
+            chart.innerHTML += `<div class="rain-bar" style="height: ${heightPct}%; background: ${bgColor};"></div>`;
           }
         })
         .catch(err => console.error("天氣載入失敗", err));
     }
 
     function closeCam() {
-      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
-      imgEl.src = ""; 
+      iframeEl.src = ""; 
       document.getElementById('cctv-panel').classList.add('hidden');
       map.invalidateSize();
     }
