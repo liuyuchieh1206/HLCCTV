@@ -3,15 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
-  <title>花蓮水利科 CCTV 監控</title>
+  <title>花蓮水利科 CCTV 監控與水情歷史</title>
 
-  <!-- iOS PWA 全螢幕與圖示支援 -->
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="水利CCTV">
   <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3241/3241473.png">
 
-  <!-- Leaflet 地圖套件 -->
   <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
   <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 
@@ -23,14 +21,13 @@
       display: flex;
       flex-direction: column;
       background: #0f172a;
-      /* 適配 iPhone 瀏海與動態島安全區域 */
       padding-top: env(safe-area-inset-top);
       padding-bottom: env(safe-area-inset-bottom);
     }
     header {
       background: #1e293b;
       color: #fff;
-      padding: 12px 16px;
+      padding: 10px 16px;
       display: flex;
       justify-content: space-between;
       align-items: center;
@@ -45,42 +42,79 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 55%;
+      height: 68%;
       background: #0f172a;
       color: #fff;
       display: flex;
       flex-direction: column;
       border-top: 2px solid #3b82f6;
       z-index: 1000;
-      box-shadow: 0 -4px 12px rgba(0,0,0,0.5);
+      box-shadow: 0 -4px 16px rgba(0,0,0,0.6);
     }
     #cctv-panel.hidden { display: none; }
     .panel-header {
-      padding: 10px 14px;
+      padding: 8px 14px;
       background: #1e293b;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      font-weight: 600;
-      font-size: 0.95rem;
     }
-    .close-btn {
-      background: #334155;
-      border: none;
-      color: #fff;
-      padding: 4px 10px;
+    .close-btn { background: #334155; border: none; color: #fff; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
+    
+    .video-container {
+      flex: 1;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      background: #000;
+      overflow: hidden;
+    }
+    #cctv-img { width: 100%; height: 100%; object-fit: contain; }
+
+    .controls {
+      background: #1e293b;
+      padding: 8px 14px;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      border-top: 1px solid #334155;
+    }
+    .timeline-info {
+      display: flex;
+      justify-content: space-between;
+      font-size: 0.8rem;
+      color: #94a3b8;
+    }
+    input[type=range] { width: 100%; accent-color: #3b82f6; cursor: pointer; }
+
+    /* 壽豐鄉水文氣象資訊卡 */
+    .info-card {
+      background: #0f172a;
+      padding: 8px 14px;
+      border-top: 1px solid #334155;
+      display: grid;
+      grid-template-columns: 1fr 1fr 1fr 1fr;
+      gap: 8px;
+      font-size: 0.75rem;
+    }
+    .info-item {
+      background: #1e293b;
+      padding: 6px;
       border-radius: 4px;
-      font-size: 0.9rem;
-      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid #334155;
     }
-    .video-container { flex: 1; width: 100%; background: #000; }
-    iframe { width: 100%; height: 100%; border: none; }
+    .info-item .label { color: #94a3b8; font-size: 0.7rem; margin-bottom: 2px; }
+    .info-item .value { font-weight: bold; color: #38bdf8; }
   </style>
 </head>
 <body>
   <header>
-    <h1>花蓮水利科 監控地圖</h1>
-    <span style="font-size: 0.8rem; color: #94a3b8;">點選圖標查看即時畫面</span>
+    <h1>花蓮水利科 監控地圖 (72H回顧)</h1>
+    <span style="font-size: 0.75rem; color: #94a3b8;">壽豐站水情</span>
   </header>
 
   <div id="container">
@@ -88,41 +122,84 @@
 
     <div id="cctv-panel" class="hidden">
       <div class="panel-header">
-        <span id="cam-name">監視器名稱</span>
+        <div>
+          <span id="cam-name" style="font-weight: bold; font-size: 0.95rem;">監視器</span>
+          <span id="cam-coord" style="font-size: 0.75rem; color: #94a3b8; margin-left: 8px;"></span>
+        </div>
         <button class="close-btn" onclick="closeCam()">關閉 ✕</button>
       </div>
+      
       <div class="video-container">
-        <iframe id="cam-iframe" src="" allowfullscreen></iframe>
+        <img id="cctv-img" src="" alt="畫面載入中..." />
+      </div>
+
+      <!-- 72 小時歷史時間滑桿 -->
+      <div class="controls">
+        <div class="timeline-info">
+          <span id="time-display">即時畫面</span>
+          <span id="mode-badge" style="color: #4ade80;">● 即時</span>
+        </div>
+        <input type="range" id="time-slider" min="0" max="0" value="0" oninput="onSliderChange(this.value)">
+      </div>
+
+      <!-- 壽豐即時氣象與時雨量資訊 -->
+      <div class="info-card">
+        <div class="info-item">
+          <span class="label">壽豐即時氣溫</span>
+          <span class="value" id="val-temp">-- °C</span>
+        </div>
+        <div class="info-item">
+          <span class="label">當前時雨量</span>
+          <span class="value" id="val-rain" style="color: #4ade80;">-- mm</span>
+        </div>
+        <div class="info-item">
+          <span class="label">相對濕度</span>
+          <span class="value" id="val-humidity">-- %</span>
+        </div>
+        <div class="info-item">
+          <span class="label">平均風速</span>
+          <span class="value" id="val-wind">-- m/s</span>
+        </div>
       </div>
     </div>
   </div>
 
   <script>
+    // 正確精確坐標
     const cctvList = [
       {
         id: "wra-000901",
-        name: "沼田橋 1 (wra-000901)",
+        name: "沼田橋 1",
         lat: 23.8717,
-        lng: 121.5119,
-        url: "https://www.twipcam.com/cam/wra-000901"
+        lng: 121.5119
       },
       {
         id: "wra-000779",
-        name: "農墾橋 1 (wra-000779)",
+        name: "農墾橋 1",
         lat: 23.8698,
-        lng: 121.5131,
-        url: "https://www.twipcam.com/cam/wra-000779"
+        lng: 121.5131
       }
     ];
 
-    const map = L.map('map').setView([23.94, 121.55], 12);
+    let historyData = {};
+    let currentCam = null;
+    let currentCamFiles = [];
+
+    // 載入歷史檔案清單 (72小時)
+    fetch('history/index.json')
+      .then(res => res.json())
+      .then(data => { historyData = data; })
+      .catch(() => console.log('尚未產生歷史資料'));
+
+    // 地圖視角聚焦於壽豐沼田橋與農墾橋區域
+    const map = L.map('map').setView([23.8708, 121.5125], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
       attribution: '© OpenStreetMap'
     }).addTo(map);
 
     const camIcon = L.divIcon({
-      html: `<div style="background:#2563eb;color:white;padding:5px;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;font-size:14px;">📹</div>`,
+      html: `<div style="background:#2563eb;color:white;padding:5px;border-radius:50%;box-shadow:0 0 8px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-size:14px;">📹</div>`,
       className: 'custom-cam-icon',
       iconSize: [28, 28],
       iconAnchor: [14, 14]
@@ -130,19 +207,76 @@
 
     cctvList.forEach(cam => {
       const marker = L.marker([cam.lat, cam.lng], { icon: camIcon }).addTo(map);
-      marker.bindTooltip(`<b>${cam.name}</b>`, { direction: 'top' });
+      marker.bindTooltip(`<b>${cam.name}</b><br>Lat: ${cam.lat}, Lng: ${cam.lng}`);
       marker.on('click', () => openCam(cam));
     });
 
     function openCam(cam) {
+      currentCam = cam;
       document.getElementById('cam-name').innerText = cam.name;
-      document.getElementById('cam-iframe').src = cam.url;
+      document.getElementById('cam-coord').innerText = `(${cam.lat}, ${cam.lng})`;
       document.getElementById('cctv-panel').classList.remove('hidden');
+
+      // 抓取壽豐該點位的即時氣象與時雨量
+      fetchWeather(cam.lat, cam.lng);
+
+      currentCamFiles = (historyData && historyData[cam.id]) ? historyData[cam.id] : [];
+      const slider = document.getElementById('time-slider');
+
+      if (currentCamFiles.length > 0) {
+        slider.max = currentCamFiles.length - 1;
+        slider.value = currentCamFiles.length - 1;
+        showImageAtIndex(slider.value);
+      } else {
+        slider.max = 0;
+        slider.value = 0;
+        document.getElementById('cctv-img').src = `https://c01.twipcam.com/cam/snapshot/${cam.id}.jpg?t=${Date.now()}`;
+        document.getElementById('time-display').innerText = "即時快照 (72H 歷史檔累積中)";
+      }
       map.invalidateSize();
     }
 
+    function onSliderChange(index) {
+      showImageAtIndex(index);
+    }
+
+    function showImageAtIndex(index) {
+      if (!currentCamFiles || currentCamFiles.length === 0) return;
+      const fileName = currentCamFiles[index];
+      document.getElementById('cctv-img').src = `history/${currentCam.id}/${fileName}`;
+      
+      const timeStr = `${fileName.slice(0,4)}/${fileName.slice(4,6)}/${fileName.slice(6,8)} ${fileName.slice(9,11)}:${fileName.slice(11,13)}`;
+      const isLatest = (index == currentCamFiles.length - 1);
+
+      document.getElementById('time-display').innerText = `記錄時間：${timeStr}`;
+      document.getElementById('mode-badge').innerText = isLatest ? "● 即時最新" : "⏱ 歷史回放";
+      document.getElementById('mode-badge').style.color = isLatest ? "#4ade80" : "#f59e0b";
+    }
+
+    // 免 API Key 取得壽豐現場精確氣溫、時雨量、濕度與風速
+    function fetchWeather(lat, lng) {
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m&timezone=Asia%2FTaipei`;
+      fetch(url)
+        .then(res => res.json())
+        .then(data => {
+          const c = data.current;
+          document.getElementById('val-temp').innerText = `${c.temperature_2m} °C`;
+          
+          const rainVal = c.precipitation;
+          const rainEl = document.getElementById('val-rain');
+          rainEl.innerText = `${rainVal} mm`;
+          // 雨量警示變色
+          if (rainVal >= 40) { rainEl.style.color = '#ef4444'; } // 豪雨紅
+          else if (rainVal >= 15) { rainEl.style.color = '#f59e0b'; } // 大雨黃
+          else { rainEl.style.color = '#4ade80'; }
+
+          document.getElementById('val-humidity').innerText = `${c.relative_humidity_2m} %`;
+          document.getElementById('val-wind').innerText = `${(c.wind_speed_10m / 3.6).toFixed(1)} m/s`;
+        })
+        .catch(err => console.error("天氣載入失敗", err));
+    }
+
     function closeCam() {
-      document.getElementById('cam-iframe').src = "";
       document.getElementById('cctv-panel').classList.add('hidden');
       map.invalidateSize();
     }
