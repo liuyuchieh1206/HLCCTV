@@ -70,7 +70,6 @@
       background: #000;
       overflow: hidden;
     }
-    /* 滿版乾淨的圖片顯示 */
     #cctv-img { width: 100%; height: 100%; object-fit: contain; }
 
     .controls {
@@ -87,7 +86,30 @@
       font-size: 0.8rem;
       color: #94a3b8;
     }
-    input[type=range] { width: 100%; accent-color: #3b82f6; cursor: pointer; margin-top: 4px; }
+    
+    /* 播放控制區塊與按鈕樣式 */
+    .slider-row {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      margin-top: 4px;
+    }
+    #play-btn {
+      background: #3b82f6;
+      color: #fff;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 6px;
+      font-size: 0.8rem;
+      font-weight: bold;
+      cursor: pointer;
+      white-space: nowrap;
+      transition: background 0.2s;
+    }
+    #play-btn:active { background: #2563eb; }
+    #play-btn.playing { background: #f59e0b; }
+    
+    input[type=range] { flex: 1; accent-color: #3b82f6; cursor: pointer; }
 
     .info-card {
       background: #0f172a;
@@ -158,10 +180,9 @@
   <header>
     <div>
       <h1>花蓮水利科 監控地圖 (72H回顧)</h1>
-      <!-- 左上角即時跳動的日期與時間 -->
       <div id="sys-clock" style="font-size: 0.75rem; color: #94a3b8;">載入時間中...</div>
     </div>
-    <span style="font-size: 0.75rem; color: #94a3b8;">壽豐站水情</span>
+    <span style="font-size: 0.75rem; color: #94a3b8;">網格推算氣象</span>
   </header>
 
   <div id="container">
@@ -176,7 +197,6 @@
         <button class="close-btn" onclick="closeCam()">關閉 ✕</button>
       </div>
       
-      <!-- 乾淨滿版的圖片容器 -->
       <div class="video-container">
         <img id="cctv-img" src="" alt="畫面載入中..." />
       </div>
@@ -186,16 +206,20 @@
           <span id="time-display">即時畫面</span>
           <span id="mode-badge" style="color: #4ade80;">● 即時</span>
         </div>
-        <input type="range" id="time-slider" min="0" max="0" value="0" oninput="onSliderChange(this.value)">
+        <!-- 加入自動播放控制區塊 -->
+        <div class="slider-row">
+          <button id="play-btn" onclick="togglePlay()">▶ 播放</button>
+          <input type="range" id="time-slider" min="0" max="0" value="0" oninput="onSliderChange(this.value)">
+        </div>
       </div>
 
       <div class="info-card">
         <div class="info-item">
-          <span class="label">壽豐即時氣溫</span>
+          <span class="label">當地即時氣溫</span>
           <span class="value" id="val-temp">-- °C</span>
         </div>
         <div class="info-item">
-          <span class="label">當前時雨量</span>
+          <span class="label">推算時雨量</span>
           <span class="value" id="val-rain" style="color: #4ade80;">-- mm</span>
         </div>
         <div class="info-item">
@@ -210,8 +234,7 @@
 
       <div class="rain-chart-container">
         <div class="rain-chart-title">
-          <span>過去 24 小時降雨趨勢</span>
-          <!-- 右側直接顯示累積總雨量數字 -->
+          <span>過去 24 小時降雨趨勢 (模型推算)</span>
           <span id="val-24h-sum" style="color: #4ade80; font-weight: bold;">累積 0.0 mm</span>
         </div>
         <div class="rain-bars" id="rain-chart"></div>
@@ -220,7 +243,6 @@
   </div>
 
   <script>
-    // 系統時鐘自動更新
     function updateClock() {
       const now = new Date();
       const timeStr = now.toLocaleString('zh-TW', { hour12: false, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit' });
@@ -237,9 +259,14 @@
     let historyData = {};
     let currentCam = null;
     let currentCamFiles = [];
+    
     let liveTimer = null;
+    let autoPlayTimer = null;
+    let isPlaying = false;
+    
     const slider = document.getElementById('time-slider');
     const imgEl = document.getElementById('cctv-img');
+    const playBtn = document.getElementById('play-btn');
 
     fetch('history/index.json')
       .then(res => res.json())
@@ -261,6 +288,7 @@
     });
 
     function openCam(cam) {
+      pauseAutoPlay(); // 打開新攝影機時先暫停播放
       currentCam = cam;
       document.getElementById('cam-name').innerText = cam.name;
       document.getElementById('cam-coord').innerText = `(${cam.lat}, ${cam.lng})`;
@@ -271,7 +299,7 @@
       currentCamFiles = (historyData && historyData[cam.id]) ? historyData[cam.id] : [];
       
       if (currentCamFiles.length > 0) {
-        slider.max = currentCamFiles.length; // Max 值保留給「即時畫面」
+        slider.max = currentCamFiles.length; // +1 給即時畫面
         slider.value = currentCamFiles.length; 
       } else {
         slider.max = 0;
@@ -282,15 +310,60 @@
       map.invalidateSize();
     }
 
+    // 手動拖拉時自動暫停
     function onSliderChange(index) {
+      if (isPlaying) pauseAutoPlay();
       showImageAtIndex(index);
+    }
+
+    // 播放鍵切換邏輯
+    function togglePlay() {
+      if (!currentCamFiles || currentCamFiles.length === 0) return;
+      if (isPlaying) {
+        pauseAutoPlay();
+      } else {
+        startAutoPlay();
+      }
+    }
+
+    function startAutoPlay() {
+      isPlaying = true;
+      playBtn.innerText = "⏸ 暫停";
+      playBtn.classList.add('playing');
+
+      // 如果已經在最後一格，自動歸零從頭播
+      if (parseInt(slider.value) === parseInt(slider.max)) {
+        slider.value = 0;
+        showImageAtIndex(0);
+      }
+
+      // 每 0.8 秒換一張圖
+      autoPlayTimer = setInterval(() => {
+        let nextIndex = parseInt(slider.value) + 1;
+        if (nextIndex > parseInt(slider.max)) {
+          // 播到底，停留在即時畫面並暫停
+          pauseAutoPlay();
+        } else {
+          slider.value = nextIndex;
+          showImageAtIndex(nextIndex);
+        }
+      }, 800); 
+    }
+
+    function pauseAutoPlay() {
+      isPlaying = false;
+      playBtn.innerText = "▶ 播放";
+      playBtn.classList.remove('playing');
+      if (autoPlayTimer) {
+        clearInterval(autoPlayTimer);
+        autoPlayTimer = null;
+      }
     }
 
     function showImageAtIndex(index) {
       const isLive = (index == slider.max);
 
       if (isLive) {
-        // 切回即時模式：改向主伺服器要乾淨的 snapshot
         updateLiveImage();
         if (!liveTimer) liveTimer = setInterval(updateLiveImage, 60000); 
 
@@ -298,7 +371,6 @@
         document.getElementById('mode-badge').innerText = "● 即時最新";
         document.getElementById('mode-badge').style.color = "#4ade80";
       } else {
-        // 切換為歷史模式
         if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
         
         if (currentCamFiles && currentCamFiles.length > 0) {
@@ -314,7 +386,6 @@
     }
 
     function updateLiveImage() {
-      // 這裡已修正回正確的 c01 伺服器，並加上雙重隨機參數徹底繞過快取
       const cacheBuster = `t=${Date.now()}&r=${Math.random()}`;
       imgEl.src = `https://c01.twipcam.com/cam/snapshot/${currentCam.id}.jpg?${cacheBuster}`;
     }
@@ -341,7 +412,6 @@
           const hourlyRain = data.hourly.precipitation.slice(0, 24); 
           const hourlyTime = data.hourly.time.slice(0, 24);
           
-          // 計算 24 小時累積加總
           const sum24h = hourlyRain.reduce((sum, val) => sum + val, 0).toFixed(1);
           const sumEl = document.getElementById('val-24h-sum');
           sumEl.innerText = `累積 ${sum24h} mm`;
@@ -368,6 +438,7 @@
     }
 
     function closeCam() {
+      pauseAutoPlay();
       if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
       imgEl.src = ""; 
       document.getElementById('cctv-panel').classList.add('hidden');
