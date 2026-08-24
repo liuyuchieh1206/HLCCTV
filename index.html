@@ -1,0 +1,151 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover">
+  <title>花蓮水利科 CCTV 監控</title>
+
+  <!-- iOS PWA 全螢幕與圖示支援 -->
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="水利CCTV">
+  <link rel="apple-touch-icon" href="https://cdn-icons-png.flaticon.com/512/3241/3241473.png">
+
+  <!-- Leaflet 地圖套件 -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      background: #0f172a;
+      /* 適配 iPhone 瀏海與動態島安全區域 */
+      padding-top: env(safe-area-inset-top);
+      padding-bottom: env(safe-area-inset-bottom);
+    }
+    header {
+      background: #1e293b;
+      color: #fff;
+      padding: 12px 16px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      border-bottom: 1px solid #334155;
+    }
+    header h1 { font-size: 1rem; }
+    #container { display: flex; flex: 1; position: relative; overflow: hidden; }
+    #map { flex: 1; height: 100%; width: 100%; }
+    
+    #cctv-panel {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 55%;
+      background: #0f172a;
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      border-top: 2px solid #3b82f6;
+      z-index: 1000;
+      box-shadow: 0 -4px 12px rgba(0,0,0,0.5);
+    }
+    #cctv-panel.hidden { display: none; }
+    .panel-header {
+      padding: 10px 14px;
+      background: #1e293b;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-weight: 600;
+      font-size: 0.95rem;
+    }
+    .close-btn {
+      background: #334155;
+      border: none;
+      color: #fff;
+      padding: 4px 10px;
+      border-radius: 4px;
+      font-size: 0.9rem;
+      cursor: pointer;
+    }
+    .video-container { flex: 1; width: 100%; background: #000; }
+    iframe { width: 100%; height: 100%; border: none; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>花蓮水利科 監控地圖</h1>
+    <span style="font-size: 0.8rem; color: #94a3b8;">點選圖標查看即時畫面</span>
+  </header>
+
+  <div id="container">
+    <div id="map"></div>
+
+    <div id="cctv-panel" class="hidden">
+      <div class="panel-header">
+        <span id="cam-name">監視器名稱</span>
+        <button class="close-btn" onclick="closeCam()">關閉 ✕</button>
+      </div>
+      <div class="video-container">
+        <iframe id="cam-iframe" src="" allowfullscreen></iframe>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const cctvList = [
+      {
+        id: "wra-000901",
+        name: "沼田橋 1 (wra-000901)",
+        lat: 23.9535,
+        lng: 121.5642,
+        url: "https://www.twipcam.com/cam/wra-000901"
+      },
+      {
+        id: "wra-000779",
+        name: "農墾橋 1 (wra-000779)",
+        lat: 23.9215,
+        lng: 121.5430,
+        url: "https://www.twipcam.com/cam/wra-000779"
+      }
+    ];
+
+    const map = L.map('map').setView([23.94, 121.55], 12);
+    L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+      maxZoom: 19,
+      attribution: '© OpenStreetMap'
+    }).addTo(map);
+
+    const camIcon = L.divIcon({
+      html: `<div style="background:#2563eb;color:white;padding:5px;border-radius:50%;box-shadow:0 0 6px rgba(0,0,0,0.4);display:flex;align-items:center;justify-content:center;font-size:14px;">📹</div>`,
+      className: 'custom-cam-icon',
+      iconSize: [28, 28],
+      iconAnchor: [14, 14]
+    });
+
+    cctvList.forEach(cam => {
+      const marker = L.marker([cam.lat, cam.lng], { icon: camIcon }).addTo(map);
+      marker.bindTooltip(`<b>${cam.name}</b>`, { direction: 'top' });
+      marker.on('click', () => openCam(cam));
+    });
+
+    function openCam(cam) {
+      document.getElementById('cam-name').innerText = cam.name;
+      document.getElementById('cam-iframe').src = cam.url;
+      document.getElementById('cctv-panel').classList.remove('hidden');
+      map.invalidateSize();
+    }
+
+    function closeCam() {
+      document.getElementById('cam-iframe').src = "";
+      document.getElementById('cctv-panel').classList.add('hidden');
+      map.invalidateSize();
+    }
+  </script>
+</body>
+</html>
