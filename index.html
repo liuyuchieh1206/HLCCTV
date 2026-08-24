@@ -42,7 +42,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 68%;
+      height: 75%; /* 稍微加高以容納圖表 */
       background: #0f172a;
       color: #fff;
       display: flex;
@@ -68,6 +68,7 @@
       align-items: center;
       background: #000;
       overflow: hidden;
+      position: relative;
     }
     #cctv-img { width: 100%; height: 100%; object-fit: contain; }
 
@@ -85,13 +86,12 @@
       font-size: 0.8rem;
       color: #94a3b8;
     }
-    input[type=range] { width: 100%; accent-color: #3b82f6; cursor: pointer; }
+    input[type=range] { width: 100%; accent-color: #3b82f6; cursor: pointer; margin-top: 4px; }
 
     /* 壽豐鄉水文氣象資訊卡 */
     .info-card {
       background: #0f172a;
       padding: 8px 14px;
-      border-top: 1px solid #334155;
       display: grid;
       grid-template-columns: 1fr 1fr 1fr 1fr;
       gap: 8px;
@@ -109,6 +109,52 @@
     }
     .info-item .label { color: #94a3b8; font-size: 0.7rem; margin-bottom: 2px; }
     .info-item .value { font-weight: bold; color: #38bdf8; }
+
+    /* 24小時雨量趨勢圖 */
+    .rain-chart-container {
+      background: #0f172a;
+      padding: 0 14px 12px 14px;
+    }
+    .rain-chart-title {
+      font-size: 0.7rem;
+      color: #94a3b8;
+      margin-bottom: 4px;
+      text-align: left;
+    }
+    .rain-bars {
+      display: flex;
+      align-items: flex-end;
+      height: 45px;
+      gap: 2px;
+      background: #1e293b;
+      padding: 4px;
+      border-radius: 4px;
+      border: 1px solid #334155;
+    }
+    .rain-bar {
+      flex: 1;
+      background: #334155;
+      border-radius: 2px 2px 0 0;
+      min-height: 1px; /* 無雨時的基礎底線 */
+      position: relative;
+    }
+    .rain-bar:hover::after {
+      content: attr(data-time) ' \A ' attr(data-val) 'mm';
+      white-space: pre;
+      position: absolute;
+      bottom: calc(100% + 4px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #f8fafc;
+      color: #0f172a;
+      padding: 4px 6px;
+      border-radius: 4px;
+      font-size: 10px;
+      z-index: 10;
+      text-align: center;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.5);
+      pointer-events: none;
+    }
   </style>
 </head>
 <body>
@@ -142,7 +188,7 @@
         <input type="range" id="time-slider" min="0" max="0" value="0" oninput="onSliderChange(this.value)">
       </div>
 
-      <!-- 壽豐即時氣象與時雨量資訊 -->
+      <!-- 壽豐即時氣象資訊 -->
       <div class="info-card">
         <div class="info-item">
           <span class="label">壽豐即時氣溫</span>
@@ -161,37 +207,36 @@
           <span class="value" id="val-wind">-- m/s</span>
         </div>
       </div>
+
+      <!-- 24小時雨量趨勢圖 -->
+      <div class="rain-chart-container">
+        <div class="rain-chart-title">過去 24 小時降雨趨勢 (點擊/觸碰長條看數值)</div>
+        <div class="rain-bars" id="rain-chart">
+          <!-- 透過 JS 動態生成長條圖 -->
+        </div>
+      </div>
     </div>
   </div>
 
   <script>
-    // 正確精確坐標
     const cctvList = [
-      {
-        id: "wra-000901",
-        name: "沼田橋 1",
-        lat: 23.8717,
-        lng: 121.5119
-      },
-      {
-        id: "wra-000779",
-        name: "農墾橋 1",
-        lat: 23.8698,
-        lng: 121.5131
-      }
+      { id: "wra-000901", name: "沼田橋 1", lat: 23.8717, lng: 121.5119 },
+      { id: "wra-000779", name: "農墾橋 1", lat: 23.8698, lng: 121.5131 }
     ];
 
     let historyData = {};
     let currentCam = null;
     let currentCamFiles = [];
+    let liveTimer = null; // 即時畫面自動更新計時器
+    const slider = document.getElementById('time-slider');
 
-    // 載入歷史檔案清單 (72小時)
+    // 載入歷史檔案清單
     fetch('history/index.json')
       .then(res => res.json())
       .then(data => { historyData = data; })
-      .catch(() => console.log('尚未產生歷史資料'));
+      .catch(() => console.log('尚未產生歷史資料，將僅顯示即時畫面'));
 
-    // 地圖視角聚焦於壽豐沼田橋與農墾橋區域
+    // 地圖初始化
     const map = L.map('map').setView([23.8708, 121.5125], 15);
     L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
       maxZoom: 19,
@@ -200,9 +245,7 @@
 
     const camIcon = L.divIcon({
       html: `<div style="background:#2563eb;color:white;padding:5px;border-radius:50%;box-shadow:0 0 8px rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;font-size:14px;">📹</div>`,
-      className: 'custom-cam-icon',
-      iconSize: [28, 28],
-      iconAnchor: [14, 14]
+      className: 'custom-cam-icon', iconSize: [28, 28], iconAnchor: [14, 14]
     });
 
     cctvList.forEach(cam => {
@@ -217,22 +260,20 @@
       document.getElementById('cam-coord').innerText = `(${cam.lat}, ${cam.lng})`;
       document.getElementById('cctv-panel').classList.remove('hidden');
 
-      // 抓取壽豐該點位的即時氣象與時雨量
+      // 抓取氣象與繪製 24H 雨量圖
       fetchWeather(cam.lat, cam.lng);
 
       currentCamFiles = (historyData && historyData[cam.id]) ? historyData[cam.id] : [];
-      const slider = document.getElementById('time-slider');
-
+      
       if (currentCamFiles.length > 0) {
-        slider.max = currentCamFiles.length - 1;
-        slider.value = currentCamFiles.length - 1;
-        showImageAtIndex(slider.value);
+        slider.max = currentCamFiles.length; // +1 格留給「最新即時畫面」
+        slider.value = currentCamFiles.length; 
       } else {
         slider.max = 0;
         slider.value = 0;
-        document.getElementById('cctv-img').src = `https://c01.twipcam.com/cam/snapshot/${cam.id}.jpg?t=${Date.now()}`;
-        document.getElementById('time-display').innerText = "即時快照 (72H 歷史檔累積中)";
       }
+      
+      showImageAtIndex(slider.value);
       map.invalidateSize();
     }
 
@@ -241,42 +282,90 @@
     }
 
     function showImageAtIndex(index) {
-      if (!currentCamFiles || currentCamFiles.length === 0) return;
-      const fileName = currentCamFiles[index];
-      document.getElementById('cctv-img').src = `history/${currentCam.id}/${fileName}`;
-      
-      const timeStr = `${fileName.slice(0,4)}/${fileName.slice(4,6)}/${fileName.slice(6,8)} ${fileName.slice(9,11)}:${fileName.slice(11,13)}`;
-      const isLatest = (index == currentCamFiles.length - 1);
+      // 如果滑桿拉到最右邊 (Max) 或是根本沒有歷史資料
+      const isLive = (index == slider.max);
 
-      document.getElementById('time-display').innerText = `記錄時間：${timeStr}`;
-      document.getElementById('mode-badge').innerText = isLatest ? "● 即時最新" : "⏱ 歷史回放";
-      document.getElementById('mode-badge').style.color = isLatest ? "#4ade80" : "#f59e0b";
+      if (isLive) {
+        updateLiveImage(); // 立刻抓一張最新
+        if (!liveTimer) {
+          // 啟動每 60 秒強制刷新一次即時畫面的排程
+          liveTimer = setInterval(updateLiveImage, 60000); 
+        }
+        document.getElementById('time-display').innerText = `觀看時間：即時畫面`;
+        document.getElementById('mode-badge').innerText = "● 即時最新";
+        document.getElementById('mode-badge').style.color = "#4ade80";
+      } else {
+        // 如果是在看歷史檔案，就關閉即時刷新的計時器
+        if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
+        
+        if (currentCamFiles && currentCamFiles.length > 0) {
+          const fileName = currentCamFiles[index];
+          document.getElementById('cctv-img').src = `history/${currentCam.id}/${fileName}`;
+          
+          const timeStr = `${fileName.slice(0,4)}/${fileName.slice(4,6)}/${fileName.slice(6,8)} ${fileName.slice(9,11)}:${fileName.slice(11,13)}`;
+          document.getElementById('time-display').innerText = `記錄時間：${timeStr}`;
+          document.getElementById('mode-badge').innerText = "⏱ 歷史回放";
+          document.getElementById('mode-badge').style.color = "#f59e0b";
+        }
+      }
     }
 
-    // 免 API Key 取得壽豐現場精確氣溫、時雨量、濕度與風速
+    function updateLiveImage() {
+      // 加入時間參數強制繞過瀏覽器快取，確保永遠拿到最新圖
+      document.getElementById('cctv-img').src = `https://c01.twipcam.com/cam/snapshot/${currentCam.id}.jpg?t=${Date.now()}`;
+    }
+
     function fetchWeather(lat, lng) {
-      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m&timezone=Asia%2FTaipei`;
+      // 一次拿回即時天氣與過去 24 小時的逐時雨量
+      const url = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&current=temperature_2m,relative_humidity_2m,precipitation,wind_speed_10m&hourly=precipitation&past_hours=24&forecast_hours=1&timezone=Asia%2FTaipei`;
+      
       fetch(url)
         .then(res => res.json())
         .then(data => {
+          // 1. 更新上方四格即時資訊卡
           const c = data.current;
           document.getElementById('val-temp').innerText = `${c.temperature_2m} °C`;
           
           const rainVal = c.precipitation;
           const rainEl = document.getElementById('val-rain');
           rainEl.innerText = `${rainVal} mm`;
-          // 雨量警示變色
-          if (rainVal >= 40) { rainEl.style.color = '#ef4444'; } // 豪雨紅
-          else if (rainVal >= 15) { rainEl.style.color = '#f59e0b'; } // 大雨黃
+          if (rainVal >= 40) { rainEl.style.color = '#ef4444'; }
+          else if (rainVal >= 15) { rainEl.style.color = '#f59e0b'; }
           else { rainEl.style.color = '#4ade80'; }
 
           document.getElementById('val-humidity').innerText = `${c.relative_humidity_2m} %`;
           document.getElementById('val-wind').innerText = `${(c.wind_speed_10m / 3.6).toFixed(1)} m/s`;
+
+          // 2. 繪製底部 24 小時長條圖
+          const hourlyRain = data.hourly.precipitation;
+          const hourlyTime = data.hourly.time;
+          const chart = document.getElementById('rain-chart');
+          chart.innerHTML = '';
+          
+          // 設定圖表最高比例 (至少以 10mm 為頂點，避免微雨時長條圖看起來像暴雨)
+          const maxRain = Math.max(...hourlyRain, 10); 
+          
+          // 只取前 24 筆 (過去 24 小時)
+          for(let i = 0; i < hourlyRain.length - 1; i++) { 
+            const val = hourlyRain[i];
+            const timeLabel = hourlyTime[i].slice(11, 16); // 擷取時間字串的 HH:MM
+            const heightPct = (val / maxRain) * 100;
+            
+            // 依據雨勢自動變色
+            let bgColor = '#334155'; // 沒雨的底色
+            if (val > 0) bgColor = '#38bdf8'; // 毛毛雨：淺藍
+            if (val >= 10) bgColor = '#f59e0b'; // 大雨：橘黃
+            if (val >= 20) bgColor = '#ef4444'; // 豪雨：紅色
+
+            // 生成長條圖元素並寫入 data 屬性供 hover 顯示使用
+            chart.innerHTML += `<div class="rain-bar" data-time="${timeLabel}" data-val="${val}" style="height: ${heightPct}%; background: ${bgColor};"></div>`;
+          }
         })
         .catch(err => console.error("天氣載入失敗", err));
     }
 
     function closeCam() {
+      if (liveTimer) { clearInterval(liveTimer); liveTimer = null; }
       document.getElementById('cctv-panel').classList.add('hidden');
       map.invalidateSize();
     }
