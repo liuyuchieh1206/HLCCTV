@@ -314,9 +314,9 @@
     }
 
     function updateLiveImage() {
-      // 使用 www 主伺服器，並加上雙重隨機參數徹底繞過 CDN 快取
+      // 這裡已修正回正確的 c01 伺服器，並加上雙重隨機參數徹底繞過快取
       const cacheBuster = `t=${Date.now()}&r=${Math.random()}`;
-      imgEl.src = `https://www.twipcam.com/cam/snapshot/${currentCam.id}.jpg?${cacheBuster}`;
+      imgEl.src = `https://c01.twipcam.com/cam/snapshot/${currentCam.id}.jpg?${cacheBuster}`;
     }
 
     function fetchWeather(lat, lng) {
