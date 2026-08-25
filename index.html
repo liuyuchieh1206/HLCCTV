@@ -43,7 +43,7 @@
       bottom: 0;
       left: 0;
       right: 0;
-      height: 80%; /* 稍微加高一點讓資訊好滑動 */
+      height: 85%; /* 給予面板足夠的高度 */
       background: #0f172a;
       color: #fff;
       display: flex;
@@ -64,14 +64,22 @@
     }
     .close-btn { background: #334155; border: none; color: #fff; padding: 4px 10px; border-radius: 4px; cursor: pointer; }
     
-    /* 影片區塊固定比例，不會被擠壓 */
+    /* 👑 修正影片區塊：限制高度，電腦版不會再爆走放大 */
     .video-container {
       width: 100%;
-      aspect-ratio: 16 / 9;
+      height: 40vh; /* 鎖定影片佔據螢幕 40% 的高度 */
+      min-height: 250px;
       background: #000;
-      position: relative;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      flex-shrink: 0; /* 防止被底下的資訊往上擠壓 */
     }
-    #cctv-img { width: 100%; height: 100%; object-fit: contain; }
+    #cctv-img { 
+      width: 100%; 
+      height: 100%; 
+      object-fit: contain; /* 自動縮放並留黑邊 */
+    }
 
     /* 下方資訊區塊改為獨立可滑動 */
     .scrollable-content {
@@ -162,7 +170,7 @@
       min-height: 1px;
     }
 
-    /* ====== 全新：13 鄉鎮全覽網格 ====== */
+    /* ====== 13 鄉鎮全覽網格 ====== */
     .county-rain-container {
       background: #0f172a;
       padding: 12px 14px 24px 14px;
@@ -170,9 +178,13 @@
     }
     .county-grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr); /* 一排顯示 4 個，乾淨俐落 */
+      grid-template-columns: repeat(4, 1fr); 
       gap: 6px;
       margin-top: 8px;
+    }
+    /* 平板或電腦版時，顯示為一排 6 個避免太寬 */
+    @media (min-width: 768px) {
+      .county-grid { grid-template-columns: repeat(6, 1fr); }
     }
     .county-item {
       background: #1e293b;
@@ -186,7 +198,6 @@
     }
     .county-item .ts-name { color: #cbd5e1; font-size: 0.75rem; margin-bottom: 3px;}
     .county-item .ts-rain { font-weight: bold; font-size: 0.85rem; color: #4ade80;}
-    /* 雨量警示色 */
     .county-item.warning .ts-rain { color: #f59e0b; }
     .county-item.danger .ts-rain { color: #ef4444; }
     .county-item.offline .ts-rain { color: #64748b; }
@@ -217,7 +228,6 @@
         <img id="cctv-img" src="" alt="畫面載入中..." />
       </div>
 
-      <!-- 下方所有資訊包在 scrollable-content 裡面，允許獨立上下滑動 -->
       <div class="scrollable-content">
         <div class="controls">
           <div class="timeline-info">
@@ -257,14 +267,13 @@
           <div class="rain-bars" id="rain-chart"></div>
         </div>
 
-        <!-- 全新的 13 鄉鎮全覽面板 -->
         <div class="county-rain-container">
           <div class="rain-chart-title">
             <span style="color:#fff; font-weight:bold;">花蓮縣 13 鄉鎮市 本日累積雨量</span>
             <button onclick="fetchCountyRainfall()" style="background:none;border:none;color:#3b82f6;cursor:pointer;font-size:0.75rem;">↻ 重新整理</button>
           </div>
           <div class="county-grid" id="county-rain-grid">
-            <div style="color:#94a3b8; font-size: 0.75rem; grid-column: span 4; text-align:center; padding: 10px;">資料向氣象署拉取中...</div>
+            <div style="color:#94a3b8; font-size: 0.75rem; grid-column: 1 / -1; text-align:center; padding: 10px;">資料向氣象署拉取中...</div>
           </div>
         </div>
       </div>
@@ -274,7 +283,6 @@
   <script>
     const CWA_API_KEY = "CWA-BF25F9D4-B21F-43D8-8260-8F026866C42E";
 
-    // 花蓮 13 鄉鎮測站對照表 (照順序排列)
     const stationsMap = {
       "C0TA40": "秀林鄉", "C0Z180": "新城鄉", "466990": "花蓮市",
       "C2TB30": "吉安鄉", "C1Z120": "壽豐鄉", "C0Z160": "鳳林鎮",
@@ -337,10 +345,9 @@
       document.getElementById('cam-coord').innerText = `(${cam.lat}, ${cam.lng})`;
       document.getElementById('cctv-panel').classList.remove('hidden');
 
-      // 呼叫天氣與雨量更新
       fetchLocalWeather(cam.station);
       fetchChartData(cam.lat, cam.lng);
-      fetchCountyRainfall(); // 每次打開面板順便更新 13 鄉鎮資料
+      fetchCountyRainfall(); 
 
       currentCamFiles = (historyData && historyData[cam.id]) ? historyData[cam.id] : [];
       
@@ -356,7 +363,6 @@
       map.invalidateSize();
     }
 
-    // ====== 擷取單一測站即時觀測資料 (上方卡片) ======
     function fetchLocalWeather(stationId) {
       const cwaUrl = `https://opendata.cwa.gov.tw/api/v1/rest/datastore/O-A0002-001?Authorization=${CWA_API_KEY}&StationId=${stationId}`;
       fetch(cwaUrl)
@@ -364,12 +370,10 @@
         .then(data => {
           if (data.records && data.records.Station && data.records.Station.length > 0) {
             const we = data.records.Station[0].WeatherElement;
-            
             const temp = (we.AirTemperature !== undefined && we.AirTemperature > -90) ? we.AirTemperature : '--';
             const humidity = (we.RelativeHumidity !== undefined && we.RelativeHumidity > -90) ? we.RelativeHumidity : '--';
             const wind = (we.WindSpeed !== undefined && we.WindSpeed > -90) ? we.WindSpeed : '--';
 
-            // 強制抓取雨量，若為異常值則顯示 0
             let rain = 0;
             if (we.Past1hr && we.Past1hr.Precipitation > -90) rain = we.Past1hr.Precipitation;
             else if (we.Now && we.Now.Precipitation > -90) rain = we.Now.Precipitation;
@@ -387,12 +391,10 @@
         }).catch(() => {});
     }
 
-    // ====== 擷取並渲染 13 鄉鎮市累積雨量 (面板最下方) ======
     function fetchCountyRainfall() {
       const endpoints = ['O-A0001-001', 'O-A0002-001', 'O-A0003-001'];
       const stationIds = Object.keys(stationsMap).join(',');
       
-      // 同時向三個資料庫要資料，確保 13 個測站都抓得到
       Promise.all(endpoints.map(ep => 
         fetch(`https://opendata.cwa.gov.tw/api/v1/rest/datastore/${ep}?Authorization=${CWA_API_KEY}&StationId=${stationIds}`)
           .then(res => res.json())
@@ -408,11 +410,9 @@
         const grid = document.getElementById('county-rain-grid');
         grid.innerHTML = '';
         
-        // 建立預設底稿，確保 13 個一定會顯示 (滿足你的需求)
         const renderData = {};
         for (let id in stationsMap) renderData[id] = { name: stationsMap[id], rain: '--' };
 
-        // 填入氣象署回傳的真實雨量
         combinedStations.forEach(st => {
           const id = st.StationId;
           if (renderData[id]) {
@@ -424,16 +424,14 @@
                else if (we.Precipitation !== undefined) rain24 = we.Precipitation;
             }
             
-            // 只要不是極端負數(維修代碼)，就顯示出來
             if (rain24 !== '--' && parseFloat(rain24) > -90) {
                renderData[id].rain = parseFloat(rain24).toFixed(1);
             } else if (parseFloat(rain24) <= -90) {
-               renderData[id].rain = '0.0'; // 如果感測器壞掉，為了不破壞排版預設顯示 0
+               renderData[id].rain = '0.0';
             }
           }
         });
 
-        // 畫出乾淨的 13 鄉鎮網格
         for (let id in stationsMap) {
           const item = renderData[id];
           let colorClass = '';
@@ -456,7 +454,6 @@
       });
     }
 
-    // ====== 保留 Open-Meteo 推算圖表 ======
     function fetchChartData(lat, lng) {
       const chartUrl = `https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lng}&hourly=precipitation&past_hours=24&forecast_hours=1&timezone=Asia%2FTaipei`;
       fetch(chartUrl)
@@ -481,7 +478,6 @@
         }).catch(() => {});
     }
 
-    // 滑桿與播放控制邏輯 (維持原樣)
     function onSliderChange(index) {
       if (isPlaying) pauseAutoPlay();
       showImageAtIndex(index);
