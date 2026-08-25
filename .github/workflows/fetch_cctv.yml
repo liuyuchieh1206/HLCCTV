@@ -1,4 +1,30 @@
-- name: 1. 擷取最新 CCTV 影像
+name: Auto Backup CCTV Snapshot & Weather
+
+on:
+  schedule:
+    - cron: '*/10 * * * *'
+  workflow_dispatch:
+
+jobs:
+  fetch-and-save:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Install Browser Automation (Playwright)
+        run: |
+          python -m pip install playwright
+          playwright install --with-deps chromium
+
+      - name: 1. 擷取最新 CCTV 影像
         run: |
           export TZ="Asia/Taipei"
           
@@ -56,3 +82,84 @@
           EOF
 
           find history/ -type f -name "*.jpg" -mtime +3 -exec rm {} \;
+
+      - name: 2. 擷取 CWA 氣象署 13 鄉鎮測站資料
+        run: |
+          export TZ="Asia/Taipei"
+          
+          python3 - <<EOF
+          import urllib.request
+          import json
+          import os
+          import csv
+          from datetime import datetime
+
+          api_key = "CWA-BF25F9D4-B21F-43D8-8260-8F026866C42E"
+          stations = {
+              "C0TA40": "秀林鄉", "C0Z180": "新城鄉", "466990": "花蓮市",
+              "C2TB30": "吉安鄉", "C1Z120": "壽豐鄉", "C0Z160": "鳳林鎮",
+              "C0Z200": "萬榮鄉", "C0T960": "光復鄉", "C0Z210": "瑞穗鄉",
+              "C0Z170": "卓溪鄉", "C0Z061": "玉里鎮", "C0T9N0": "富里鄉",
+              "C0T9I0": "豐濱鄉"
+          }
+          
+          station_ids = ",".join(stations.keys())
+          endpoints = ['O-A0001-001', 'O-A0002-001', 'O-A0003-001']
+          
+          os.makedirs("weather_data", exist_ok=True)
+          current_month = datetime.now().strftime("%Y-%m")
+          csv_path = f"weather_data/hualien_weather_{current_month}.csv"
+          file_exists = os.path.isfile(csv_path)
+          
+          with open(csv_path, 'a', newline='', encoding='utf-8-sig') as f:
+              writer = csv.writer(f)
+              if not file_exists:
+                  writer.writerow(["觀測時間", "測站代碼", "鄉鎮名稱", "氣溫(°C)", "相對濕度(%)", "風速(m/s)", "時雨量(mm)", "日累積雨量(mm)"])
+                  
+              fetched_ids = set()
+              for ep in endpoints:
+                  url = f"https://opendata.cwa.gov.tw/api/v1/rest/datastore/{ep}?Authorization={api_key}&StationId={station_ids}"
+                  try:
+                      req = urllib.request.Request(url)
+                      with urllib.request.urlopen(req) as response:
+                          data = json.loads(response.read().decode('utf-8'))
+                      records = data.get('records', {}).get('Station', [])
+                      
+                      for st in records:
+                          st_id = st['StationId']
+                          if st_id in fetched_ids: continue
+                          fetched_ids.add(st_id)
+                          
+                          obs_time = st['ObsTime']['DateTime']
+                          st_name = stations.get(st_id, st.get('StationName', ''))
+                          we = st.get('WeatherElement', {})
+                          
+                          def get_val(val):
+                              try:
+                                  v = float(val)
+                                  if v < -90: return ""
+                                  return v
+                              except:
+                                  return ""
+                          
+                          temp = get_val(we.get('AirTemperature'))
+                          hum = get_val(we.get('RelativeHumidity'))
+                          wind = get_val(we.get('WindSpeed'))
+                          
+                          rain1hr = get_val(we.get('Past1hr', {}).get('Precipitation'))
+                          if rain1hr == "":
+                              rain1hr = get_val(we.get('Now', {}).get('Precipitation'))
+                          rain24hr = get_val(we.get('Past24hr', {}).get('Precipitation'))
+                          
+                          writer.writerow([obs_time, st_id, st_name, temp, hum, wind, rain1hr, rain24hr])
+                  except Exception as e:
+                      pass
+          EOF
+
+      - name: 3. Commit and Push
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add history/ weather_data/
+          git commit -m "Auto backup CCTV & Weather [skip ci]" || exit 0
+          git push
