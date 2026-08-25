@@ -54,7 +54,6 @@ jobs:
                       
                       time.sleep(15)
                       
-                      # 👑 殺手鐧：截圖前強制清除網頁上的 Google 廣告
                       page.evaluate("""
                           document.querySelectorAll('ins, iframe, .adsbygoogle, [id^="google_ads"]').forEach(el => el.remove());
                       """)
@@ -69,7 +68,6 @@ jobs:
                       
               browser.close()
 
-          # 更新前端用的圖片索引
           data = {}
           for c in cams:
               path = f"history/{c}"
@@ -80,10 +78,9 @@ jobs:
               json.dump(data, f)
           EOF
 
-          # 自動清理超過 72 小時的舊圖片
           find history/ -type f -name "*.jpg" -mtime +3 -exec rm {} \;
 
-      - name: 2. 擷取 CWA 氣象署 13 鄉鎮測站資料 (含去重防呆)
+      - name: 2. 擷取 CWA 氣象署 13 鄉鎮測站資料 (含去重與空包彈防護)
         run: |
           export TZ="Asia/Taipei"
           
@@ -111,12 +108,11 @@ jobs:
           csv_path = f"weather_data/hualien_weather_{current_month}.csv"
           file_exists = os.path.isfile(csv_path)
           
-          # 👑 防呆升級：讀取現有資料，避免重複寫入同一時間點的紀錄
           existing_records = set()
           if file_exists:
               with open(csv_path, 'r', encoding='utf-8-sig') as f:
                   reader = csv.reader(f)
-                  next(reader, None) # 跳過標題列
+                  next(reader, None)
                   for row in reader:
                       if len(row) >= 2:
                           existing_records.add(f"{row[1]}_{row[0]}")
@@ -139,12 +135,10 @@ jobs:
                           st_id = st['StationId']
                           obs_time = st['ObsTime']['DateTime']
                           
-                          # 檢查這筆時間的資料是不是已經存過了
                           if f"{st_id}_{obs_time}" in existing_records:
                               continue
                               
                           if st_id in fetched_ids: continue
-                          fetched_ids.add(st_id)
                           
                           st_name = stations.get(st_id, st.get('StationName', ''))
                           we = st.get('WeatherElement', {})
@@ -166,6 +160,11 @@ jobs:
                               rain1hr = get_val(we.get('Now', {}).get('Precipitation'))
                           rain24hr = get_val(we.get('Past24hr', {}).get('Precipitation'))
                           
+                          # 👑 拒收空包彈：如果溫度和雨量都是空白，代表儀器還沒回傳，直接跳過不存檔！
+                          if temp == "" and rain1hr == "" and rain24hr == "":
+                              continue
+                              
+                          fetched_ids.add(st_id)
                           writer.writerow([obs_time, st_id, st_name, temp, hum, wind, rain1hr, rain24hr])
                   except Exception as e:
                       pass
