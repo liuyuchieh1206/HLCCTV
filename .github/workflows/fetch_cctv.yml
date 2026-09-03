@@ -22,7 +22,7 @@ jobs:
           python -m pip install playwright
           playwright install --with-deps chromium
 
-      - name: 1. 擷取最新 CCTV 影像 (含廣告清除)
+      - name: 1. 擷取最新 CCTV 影像 (含廣告清除與自動瘦身)
         run: |
           export TZ="Asia/Taipei"
           
@@ -68,17 +68,21 @@ jobs:
                       
               browser.close()
 
+          # 👑 自動瘦身機制：更新索引的同時，刪除過舊的照片 (每個測站只保留最新 150 張，約 25 小時)
           data = {}
           for c in cams:
               path = f"history/{c}"
               if os.path.exists(path):
                   files = sorted([f for f in os.listdir(path) if f.endswith(".jpg")])
+                  
+                  while len(files) > 150:
+                      oldest = files.pop(0)
+                      os.remove(os.path.join(path, oldest))
+                      
                   data[c] = files
           with open("history/index.json", "w") as f:
               json.dump(data, f)
           EOF
-
-          find history/ -type f -name "*.jpg" -mtime +3 -exec rm {} \;
 
       - name: 2. 擷取 CWA 氣象署 13 鄉鎮測站資料 (含去重與空包彈防護)
         run: |
@@ -160,7 +164,6 @@ jobs:
                               rain1hr = get_val(we.get('Now', {}).get('Precipitation'))
                           rain24hr = get_val(we.get('Past24hr', {}).get('Precipitation'))
                           
-                          # 👑 拒收空包彈：如果溫度和雨量都是空白，代表儀器還沒回傳，直接跳過不存檔！
                           if temp == "" and rain1hr == "" and rain24hr == "":
                               continue
                               
